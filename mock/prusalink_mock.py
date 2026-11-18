@@ -11,10 +11,15 @@ shaped after Prusa's published OpenAPI document
     GET /api/v1/job       the current job and its file (204 when none)
     GET /thumb/l/...      the model preview the job's file refers to (PNG)
 
-Both ways a client can sign in are accepted: an ``X-Api-Key`` header that
-equals the password, and HTTP Digest (RFC 7616, MD5 or SHA-256) with a
-username and the password. ``--auth`` narrows that to one of the two so each
-path can be tested alone.
+Both ways a client can sign in are accepted: an ``X-Api-Key`` header, and
+HTTP Digest (RFC 7616) with a username and the password. The key is the
+password unless ``--api-key`` sets a separate one, as the Raspberry Pi
+PrusaLink has. ``--auth`` narrows sign-in to one of the two.
+
+Two habits are copied from a real Raspberry Pi PrusaLink 0.8.1, because
+they are easy to trip over: a request carrying an ``X-Api-Key`` it doesn't
+recognise is refused with 403 even beside a valid Digest response, and the
+Digest algorithm is "MD5-sess", which the answer must repeat exactly.
 
 Run it:
 
@@ -146,8 +151,9 @@ class MockPrinter:
         live: bool = False,
         name: str = "Original Prusa MK3.5S",
         file_name: str = DEFAULT_FILE,
-        digest_algorithm: str = "MD5",
+        digest_algorithm: str = "MD5-sess",
         thumbnail: bool = True,
+        api_key: str | None = None,
     ) -> None:
         if scenario not in SCENARIOS:
             raise ValueError(
@@ -163,6 +169,7 @@ class MockPrinter:
         self.file_name = file_name
         self.digest_algorithm = digest_algorithm
         self.thumbnail = thumbnail
+        self.api_key = api_key if api_key is not None else password
         self._png: bytes | None = None
         self.job_id = 420
         self._progress = max(0.0, min(100.0, float(progress)))
@@ -296,18 +303,25 @@ class MockPrinter:
 
     def challenge(self) -> str:
         return (
-            f'Digest realm="{REALM}", qop="auth", nonce="{self.nonce}", '
-            f"algorithm={self.digest_algorithm}"
+            f'Digest realm="{REALM}",qop="auth",algorithm="{self.digest_algorithm}",'
+            f'nonce="{self.nonce}"'
         )
 
-    def authorized(self, method: str, headers: Any) -> bool:
-        if self.auth in ("both", "apikey"):
-            key = headers.get("X-Api-Key")
-            if key is not None and secrets.compare_digest(key, self.password):
-                return True
-        if self.auth in ("both", "digest"):
-            return self._digest_ok(method, headers.get("Authorization") or "")
-        return False
+    def check(self, method: str, headers: Any) -> int:
+        """200 when signed in, 403 for an API key that isn't ours (whatever
+        else the request carries), 401 otherwise."""
+        key = headers.get("X-Api-Key")
+        if key is not None:
+            if self.auth in ("both", "apikey") and secrets.compare_digest(
+                key, self.api_key
+            ):
+                return 200
+            return 403
+        if self.auth in ("both", "digest") and self._digest_ok(
+            method, headers.get("Authorization") or ""
+        ):
+            return 200
+        return 401
 
     def _digest_ok(self, method: str, header: str) -> bool:
         if not header.lower().startswith("digest "):
@@ -320,7 +334,9 @@ class MockPrinter:
         }
         if fields.get("username") != self.username or fields.get("nonce") != self.nonce:
             return False
-        algorithm = (fields.get("algorithm") or "MD5").upper()
+        if fields.get("algorithm", self.digest_algorithm) != self.digest_algorithm:
+            return False  # compared letter for letter, as the real one does
+        algorithm = self.digest_algorithm.upper()
         hasher = hashlib.sha256 if algorithm.startswith("SHA-256") else hashlib.md5
 
         def h(text: str) -> str:
@@ -384,7 +400,11 @@ class _Handler(BaseHTTPRequestHandler):
             )
             return
 
-        if not self.printer.authorized(method, self.headers):
+        verdict = self.printer.check(method, self.headers)
+        if verdict == 403:
+            self._send(403, {"title": "Forbidden", "text": "Unknown API key."})
+            return
+        if verdict == 401:
             self._send(
                 401,
                 {"title": "Unauthorized", "text": "Sign in to PrusaLink."},
@@ -461,6 +481,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--username", default=DEFAULT_USERNAME)
     parser.add_argument("--password", default=DEFAULT_PASSWORD)
     parser.add_argument(
+        "--api-key",
+        default=None,
+        help="a key separate from the password (default: the password)",
+    )
+    parser.add_argument(
         "--auth",
         default="both",
         choices=("both", "apikey", "digest"),
@@ -509,6 +534,7 @@ def main(argv: list[str] | None = None) -> int:
         file_name=args.file,
         digest_algorithm=args.digest_algorithm,
         thumbnail=not args.no_thumbnail,
+        api_key=args.api_key,
     )
     server = make_server(printer, host=args.host, port=args.port, quiet=False)
     print(

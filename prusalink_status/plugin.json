@@ -1,7 +1,7 @@
 {
   "tesserae_compat": "1.x",
   "name": "PrusaLink, Status",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "kind": "widget",
   "category": "utility",
   "description": "Live print monitor for an Original Prusa printer over PrusaLink: printer state, job progress with time left and finish time, nozzle and bed temperatures, and the slicer's preview of the model. Talks to the printer on your own network; no Prusa account needed.",
@@ -60,22 +60,28 @@
       "type": "string",
       "label": "Printer address",
       "default": "",
-      "help": "The printer's address on your network, for example http://192.168.1.50. It is shown on the printer under Settings, Network."
-    },
-    {
-      "name": "password",
-      "type": "string",
-      "label": "PrusaLink password",
-      "secret": true,
-      "help": "Shown on the printer under Settings, Network, PrusaLink. It is also the printer's API key."
+      "help": "The printer's address on your network, for example http://192.168.1.50. Prefer the IP address: a name like prusalink.local often can't be looked up from inside Docker or Home Assistant."
     },
     {
       "name": "username",
       "type": "string",
       "label": "Username",
       "default": "maker",
-      "advanced": true,
-      "help": "Only change this if you changed it on the printer."
+      "help": "maker on a printer with PrusaLink built in. On a Raspberry Pi PrusaLink, the username you chose when setting it up."
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "label": "Password",
+      "secret": true,
+      "help": "On a printer with PrusaLink built in: Settings, Network, PrusaLink on the printer's screen. On a Raspberry Pi PrusaLink: the password you chose when setting it up."
+    },
+    {
+      "name": "api_key",
+      "type": "string",
+      "label": "API key",
+      "secret": true,
+      "help": "Optional, and enough on its own without a username and password. On a Raspberry Pi PrusaLink it is under Settings, API key."
     }
   ],
   "data_schema": {

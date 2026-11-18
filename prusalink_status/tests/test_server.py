@@ -69,7 +69,7 @@ def test_finished_print_reads_100(printer) -> None:
 
 
 @pytest.mark.parametrize("auth", ["apikey", "digest"])
-@pytest.mark.parametrize("algorithm", ["MD5", "SHA-256"])
+@pytest.mark.parametrize("algorithm", ["MD5-sess", "MD5", "SHA-256"])
 def test_signs_in_either_way(printer, auth: str, algorithm: str) -> None:
     data = fetch(printer("printing", auth=auth, digest_algorithm=algorithm))
     assert data["state"]["tone"] == "printing"
@@ -86,7 +86,7 @@ def test_wrong_password_is_an_error(printer) -> None:
     data = widget.fetch(
         {}, {"base_url": printer("printing"), "password_secret": "nope"}, ctx={}
     )
-    assert "refused the PrusaLink password" in data["error"]
+    assert "refused the PrusaLink sign-in" in data["error"]
 
 
 def test_missing_settings_are_errors() -> None:
@@ -184,3 +184,26 @@ def test_hero_preview_is_passed_through_and_forces_the_picture(printer) -> None:
 def test_hero_defaults_to_ring(printer) -> None:
     assert fetch(printer("printing"))["hero"] == "ring"
     assert fetch(printer("printing"), options={"hero": "nonsense"})["hero"] == "ring"
+
+
+def test_separate_api_key_alone_is_enough(printer) -> None:
+    url = printer("idle", api_key="pi-key")
+    data = widget.fetch({}, {"base_url": url, "api_key_secret": "pi-key"}, ctx={})
+    assert data["state"]["tone"] == "idle"
+
+
+def test_password_still_works_when_the_key_is_separate(printer) -> None:
+    # The Raspberry Pi PrusaLink: the password is not a valid API key, and a
+    # wrong key in the request gets 403 even with a good Digest answer.
+    assert fetch(printer("idle", api_key="pi-key"))["state"]["tone"] == "idle"
+
+
+def test_wrong_api_key_falls_back_to_the_password(printer) -> None:
+    url = printer("idle", api_key="pi-key")
+    assert fetch(url, api_key_secret="stale")["state"]["tone"] == "idle"
+
+
+def test_wrong_api_key_and_no_password_is_an_error(printer) -> None:
+    url = printer("idle", api_key="pi-key")
+    data = widget.fetch({}, {"base_url": url, "api_key_secret": "stale"}, ctx={})
+    assert "refused the PrusaLink sign-in" in data["error"]

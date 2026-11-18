@@ -33,11 +33,12 @@ and returns the shape client.js paints from:
       "nozzle", "bed"
     }
 
-Signing in: PrusaLink takes the password from the printer's
-Settings > Network > PrusaLink screen either as an ``X-Api-Key`` header or
-through HTTP Digest with the username ``maker``. Every request carries the
-header; if the printer answers 401 with a Digest challenge the request is
-repeated with a Digest response. Digest is done here, not with urllib's
+Signing in: PrusaLink takes a username and password through HTTP Digest, or
+an API key in an ``X-Api-Key`` header. On printers with PrusaLink built in the
+key is the password; the Raspberry Pi PrusaLink has a separate key. With a key
+set it is tried first, alone. Otherwise a request is sent bare; the printer's
+401 carries a Digest challenge, which is answered, and only if that is refused
+is the password tried as a key. Digest is done here, not with urllib's
 handler, because urllib only knows MD5 and SHA-1.
 
 The model preview is the picture the slicer stores inside the G-code file.
@@ -47,7 +48,8 @@ in the widget's data folder per file, so a print costs one download.
 
 A printer that is switched off is a normal state for a 3D printer, so an
 unreachable address renders the card as *offline*. ``{"error": ...}`` is kept
-for things the owner has to fix: no address, no password, a wrong password.
+for things the owner has to fix: no address, nothing to sign in with, or a
+sign-in the printer refuses.
 
 Standard library only, so the module can be tested without the host.
 """
@@ -171,7 +173,8 @@ def _digest_header(
 ) -> str | None:
     """Build the Authorization header answering ``challenge``, or None when
     the printer asks for an algorithm this code doesn't have."""
-    algorithm = (challenge.get("algorithm") or "MD5").upper()
+    stated = challenge.get("algorithm") or "MD5"
+    algorithm = stated.upper()
     family = algorithm.removesuffix("-SESS")
     if family == "MD5":
         hasher = hashlib.md5
@@ -200,7 +203,9 @@ def _digest_header(
         f'realm="{realm}"',
         f'nonce="{nonce}"',
         f'uri="{uri}"',
-        f"algorithm={algorithm}",
+        # Echoed exactly as the printer wrote it: PrusaLink sends "MD5-sess"
+        # and compares the answer letter for letter.
+        f"algorithm={stated}",
     ]
     if "auth" in offered:
         response = h(f"{ha1}:{nonce}:{nc}:{cnonce}:auth:{ha2}")
@@ -231,46 +236,67 @@ def _open(url: str, headers: dict[str, str], *, binary: bool) -> Any:
     return json.loads(raw.decode("utf-8"))
 
 
+def _try(url: str, headers: dict[str, str], *, binary: bool) -> tuple[bool, Any, Any]:
+    """One attempt. ``(True, body, None)`` on success; ``(False, None,
+    challenge)`` when the printer answers 401 or 403, with the Digest
+    challenge if it sent one. Anything else is ``_Unreachable``."""
+    try:
+        return True, _open(url, headers, binary=binary), None
+    except urllib.error.HTTPError as err:
+        code = err.code
+        challenge = _digest_challenge(err.headers) if code == 401 else None
+        err.close()
+        if code in (401, 403):
+            return False, None, challenge
+        raise _Unreachable(f"HTTP {code}") from None
+
+
 def _get(
-    base: str, path: str, username: str, password: str, *, binary: bool = False
+    base: str,
+    path: str,
+    username: str,
+    password: str,
+    *,
+    api_key: str = "",
+    binary: bool = False,
 ) -> Any:
     """GET ``base + path`` signed in. Raises ``_AuthError`` when the printer
-    refuses the password and ``_Unreachable`` when nothing useful answers."""
+    refuses the sign-in and ``_Unreachable`` when nothing useful answers.
+
+    A key and a Digest response never travel in the same request: the
+    Raspberry Pi PrusaLink answers 403 to any request carrying an
+    ``X-Api-Key`` it doesn't recognise, even beside a valid Digest response.
+    """
     headers = {
         "User-Agent": USER_AGENT,
         "Accept": "image/png, image/jpeg" if binary else "application/json",
         "Accept-Encoding": "identity",
-        "X-Api-Key": password,
     }
+    url = base + path
     try:
-        try:
-            return _open(base + path, headers, binary=binary)
-        except urllib.error.HTTPError as err:
-            challenge = _digest_challenge(err.headers) if err.code == 401 else None
-            code = err.code
-            err.close()
-            if code == 403:
-                raise _AuthError from None
-            if code != 401:
-                raise _Unreachable(f"HTTP {code}") from None
-            if challenge is None:
-                raise _AuthError from None
+        if api_key:
+            ok, body, _ = _try(url, {**headers, "X-Api-Key": api_key}, binary=binary)
+            if ok:
+                return body
+            if not password:
+                raise _AuthError
+        ok, body, challenge = _try(url, headers, binary=binary)
+        if ok:
+            return body
+        if challenge is not None:
             authorization = _digest_header(
                 challenge, method="GET", uri=path, username=username, password=password
             )
-            if authorization is None:
-                raise _AuthError from None
-
-        try:
-            return _open(
-                base + path, {**headers, "Authorization": authorization}, binary=binary
-            )
-        except urllib.error.HTTPError as err:
-            code = err.code
-            err.close()
-            if code in (401, 403):
-                raise _AuthError from None
-            raise _Unreachable(f"HTTP {code}") from None
+            if authorization is not None:
+                ok, body, _ = _try(
+                    url, {**headers, "Authorization": authorization}, binary=binary
+                )
+                if ok:
+                    return body
+        ok, body, _ = _try(url, {**headers, "X-Api-Key": password}, binary=binary)
+        if ok:
+            return body
+        raise _AuthError
     except (_AuthError, _Unreachable):
         raise
     except (urllib.error.URLError, TimeoutError, OSError, ValueError) as err:
@@ -299,6 +325,7 @@ def _thumbnail(
     username: str,
     password: str,
     data_dir: Any,
+    api_key: str = "",
 ) -> str | None:
     """The current file's preview as a ``data:`` URI, or None. Never raises:
     a missing picture costs the picture, not the card."""
@@ -321,7 +348,7 @@ def _thumbnail(
             raw = cache.read_bytes()
     if raw is None:
         try:
-            raw = _get(base, path, username, password, binary=True)
+            raw = _get(base, path, username, password, api_key=api_key, binary=True)
         except (_AuthError, _Unreachable):
             return None
         if not isinstance(raw, bytes) or _image_mime(raw) is None:
@@ -388,18 +415,20 @@ def fetch(
 
     if not base:
         return {"error": "Set the printer's address in the PrusaLink widget settings."}
-    if not password:
+    api_key = str(
+        settings.get("api_key_secret") or settings.get("api_key") or ""
+    ).strip()
+    if not password and not api_key:
         return {
-            "error": "Set the PrusaLink password in the widget settings. "
-            "It is on the printer under Settings, Network, PrusaLink."
+            "error": "Set the PrusaLink password or API key in the widget settings."
         }
 
     try:
-        status = _get(base, "/api/v1/status", username, password)
+        status = _get(base, "/api/v1/status", username, password, api_key=api_key)
     except _AuthError:
         return {
-            "error": "The printer refused the PrusaLink password. Check it on the "
-            "printer under Settings, Network, PrusaLink."
+            "error": "The printer refused the PrusaLink sign-in. Check the username, "
+            "password or API key in the widget settings against the printer."
         }
     except _Unreachable:
         return _offline(wanted_title or "Prusa", now, hero)
@@ -419,7 +448,7 @@ def fetch(
     job_doc: dict[str, Any] = {}
     if telemetry:
         try:
-            answer = _get(base, "/api/v1/job", username, password)
+            answer = _get(base, "/api/v1/job", username, password, api_key=api_key)
             if isinstance(answer, dict):
                 job_doc = answer
         except (_AuthError, _Unreachable):
@@ -428,7 +457,7 @@ def fetch(
     title = wanted_title
     if not title:
         try:
-            info = _get(base, "/api/v1/info", username, password)
+            info = _get(base, "/api/v1/info", username, password, api_key=api_key)
             if isinstance(info, dict):
                 title = str(info.get("name") or "").strip()
         except (_AuthError, _Unreachable):
@@ -466,6 +495,7 @@ def fetch(
                 username,
                 password,
                 (ctx or {}).get("data_dir"),
+                api_key,
             )
             if show_preview
             else None,
