@@ -9,7 +9,7 @@ shaped after Prusa's published OpenAPI document
     GET /api/v1/info      printer name, nozzle, serial
     GET /api/v1/status    state, temperatures, job telemetry
     GET /api/v1/job       the current job and its file (204 when none)
-    GET /thumb/l/...      the model preview the job's file refers to (PNG)
+    GET /api/thumbnails/...  the model preview the job's file refers to (PNG)
 
 Both ways a client can sign in are accepted: an ``X-Api-Key`` header, and
 HTTP Digest (RFC 7616) with a username and the password. The key is the
@@ -48,6 +48,7 @@ import time
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import unquote
 
 SCENARIOS = (
     "idle",
@@ -278,14 +279,16 @@ class MockPrinter:
             "file": {
                 "name": short,
                 "display_name": self.file_name,
-                "path": "/usb",
-                "display_path": "/usb",
+                "path": f"/PrusaLink gcodes/{self.file_name}",
+                "display_path": f"/PrusaLink gcodes/{self.file_name}",
                 "size": 2393142,
                 "m_timestamp": 1794268800,
+                # Unencoded, space included: this is what a real Raspberry Pi
+                # PrusaLink sends, and a client has to cope with it.
                 "refs": {
-                    "download": f"/usb/{short}",
-                    "icon": f"/thumb/s/usb/{short}",
-                    "thumbnail": f"/thumb/l/usb/{short}",
+                    "download": f"/api/files/local/PrusaLink gcodes/{self.file_name}/raw",
+                    "icon": None,
+                    "thumbnail": f"/api/thumbnails/PrusaLink gcodes/{self.file_name}.orig.png",
                 },
             },
         }
@@ -425,7 +428,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/v1/job":
             job = self.printer.job()
             self._send(204 if job is None else 200, job)
-        elif path.startswith("/thumb/"):
+        elif unquote(path).startswith("/api/thumbnails/PrusaLink gcodes/"):
             png = self.printer.preview() if self.printer.job() else None
             if png is None:
                 self._send(

@@ -207,3 +207,24 @@ def test_wrong_api_key_and_no_password_is_an_error(printer) -> None:
     url = printer("idle", api_key="pi-key")
     data = widget.fetch({}, {"base_url": url, "api_key_secret": "stale"}, ctx={})
     assert "refused the PrusaLink sign-in" in data["error"]
+
+
+def test_preview_path_with_a_space_is_fetched(printer) -> None:
+    # The mock, like the real printer, gives the path as
+    # "/api/thumbnails/PrusaLink gcodes/<file>.orig.png".
+    job = fetch(printer("printing", auth="digest"))["job"]
+    assert job["thumbnail"].startswith("data:image/png;base64,")
+
+
+def test_a_broken_preview_never_breaks_the_card(printer, monkeypatch) -> None:
+    real = widget._get
+
+    def explode(base, path, *args, **kwargs):
+        if kwargs.get("binary"):
+            raise RuntimeError("anything at all")
+        return real(base, path, *args, **kwargs)
+
+    monkeypatch.setattr(widget, "_get", explode)
+    data = fetch(printer("printing"))
+    assert data["state"]["tone"] == "printing"
+    assert data["job"]["thumbnail"] is None

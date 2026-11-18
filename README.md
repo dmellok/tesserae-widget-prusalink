@@ -10,10 +10,11 @@ account or Prusa Connect is involved.
 ![The widget at its largest size, showing a print at 42%](screenshots/lg.png)
 
 > **Status: early.** Checked against one real printer, an MK3S+ running the
-> Raspberry Pi PrusaLink 0.8.1, while idle: sign-in, state and temperatures
-> work. A running print and the model preview have only been exercised
-> against the mock printer in this repository, and no printer with PrusaLink
-> built in has been tried yet. Reports are welcome.
+> Raspberry Pi PrusaLink 0.8.1: sign-in, an idle printer, and a running print
+> with its model preview all work. The other states (paused, finished and so
+> on) have only been exercised against the mock printer in this repository,
+> and no printer with PrusaLink built in has been tried yet. Reports are
+> welcome.
 
 ## Folders shipped
 

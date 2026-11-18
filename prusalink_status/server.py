@@ -59,10 +59,12 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import http.client
 import json
 import re
 import secrets
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -272,6 +274,11 @@ def _get(
         "Accept": "image/png, image/jpeg" if binary else "application/json",
         "Accept-Encoding": "identity",
     }
+    # File paths come from the printer as written on its disk, spaces and
+    # all ("/api/thumbnails/PrusaLink gcodes/..."). Encode what a URL can't
+    # carry, leaving anything already encoded alone. The Digest answer signs
+    # this same encoded form, since that is what goes on the wire.
+    path = urllib.parse.quote(path, safe="/%?&=:@!$'()*+,;~-._")
     url = base + path
     try:
         if api_key:
@@ -299,9 +306,17 @@ def _get(
         raise _AuthError
     except (_AuthError, _Unreachable):
         raise
-    except (urllib.error.URLError, TimeoutError, OSError, ValueError) as err:
+    except (
+        urllib.error.URLError,
+        http.client.HTTPException,
+        TimeoutError,
+        OSError,
+        ValueError,
+    ) as err:
         # ValueError covers a malformed URL and a body that isn't JSON:
         # something answered, and it wasn't a PrusaLink printer.
+        # HTTPException covers a URL http.client refuses to send and a
+        # response it can't parse.
         raise _Unreachable(str(err)) from None
 
 
@@ -349,7 +364,8 @@ def _thumbnail(
     if raw is None:
         try:
             raw = _get(base, path, username, password, api_key=api_key, binary=True)
-        except (_AuthError, _Unreachable):
+        except Exception:
+            # Whatever went wrong, the card is worth more than the picture.
             return None
         if not isinstance(raw, bytes) or _image_mime(raw) is None:
             return None
