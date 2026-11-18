@@ -1,0 +1,139 @@
+{
+  "tesserae_compat": "1.x",
+  "name": "PrusaLink, Status",
+  "version": "0.1.0",
+  "kind": "widget",
+  "category": "utility",
+  "description": "Live print monitor for an Original Prusa printer over PrusaLink: printer state, job progress with time left and finish time, nozzle and bed temperatures, and the slicer's preview of the model. Talks to the printer on your own network; no Prusa account needed.",
+  "icon": "ph-printer",
+  "supports": {
+    "sizes": [
+      "xs",
+      "sm",
+      "md",
+      "lg"
+    ]
+  },
+  "requires": [
+    "network:*",
+    "settings:plugin"
+  ],
+  "cell_options": [
+    {
+      "name": "title",
+      "type": "string",
+      "label": "Title",
+      "default": "",
+      "help": "Leave empty to use the name the printer gives itself."
+    },
+    {
+      "name": "hero",
+      "type": "select",
+      "label": "Lead with",
+      "default": "ring",
+      "choices": [
+        {
+          "value": "ring",
+          "label": "Progress ring"
+        },
+        {
+          "value": "preview",
+          "label": "Model preview"
+        }
+      ],
+      "help": "Model preview fills the card with the slicer's picture of the part, with progress as a bar underneath. Falls back to the ring when the file has no picture."
+    },
+    {
+      "name": "show_preview",
+      "type": "boolean",
+      "label": "Show the model preview",
+      "default": true,
+      "help": "The picture your slicer saves inside the file, shown beside the ring at the two larger sizes.",
+      "show_if": {
+        "hero": "ring"
+      }
+    }
+  ],
+  "settings": [
+    {
+      "name": "base_url",
+      "type": "string",
+      "label": "Printer address",
+      "default": "",
+      "help": "The printer's address on your network, for example http://192.168.1.50. It is shown on the printer under Settings, Network."
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "label": "PrusaLink password",
+      "secret": true,
+      "help": "Shown on the printer under Settings, Network, PrusaLink. It is also the printer's API key."
+    },
+    {
+      "name": "username",
+      "type": "string",
+      "label": "Username",
+      "default": "maker",
+      "advanced": true,
+      "help": "Only change this if you changed it on the printer."
+    }
+  ],
+  "data_schema": {
+    "fields": [
+      {
+        "name": "state_text",
+        "type": "str",
+        "label": "Printer state"
+      },
+      {
+        "name": "progress",
+        "type": "num",
+        "label": "Progress",
+        "unit": "%"
+      },
+      {
+        "name": "job_name",
+        "type": "str",
+        "label": "File being printed"
+      },
+      {
+        "name": "eta",
+        "type": "str",
+        "label": "Finish time"
+      },
+      {
+        "name": "remaining_min",
+        "type": "num",
+        "label": "Time left",
+        "unit": "min"
+      },
+      {
+        "name": "nozzle",
+        "type": "num",
+        "label": "Nozzle temperature",
+        "unit": "°C"
+      },
+      {
+        "name": "bed",
+        "type": "num",
+        "label": "Bed temperature",
+        "unit": "°C"
+      }
+    ],
+    "sample": {
+      "state_text": "Printing",
+      "progress": 42,
+      "job_name": "Tesserae_Frame_Stand_0.2mm_PLA",
+      "eta": "14:32",
+      "remaining_min": 111,
+      "nozzle": 214.8,
+      "bed": 59.7
+    }
+  },
+  "render": {
+    "needs_network": true
+  },
+  "design": {
+    "palette": "extended"
+  }
+}
