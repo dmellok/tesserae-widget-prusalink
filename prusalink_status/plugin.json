@@ -1,7 +1,7 @@
 {
   "tesserae_compat": "1.x",
   "name": "PrusaLink, Status",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "kind": "widget",
   "category": "utility",
   "description": "Live print monitor for an Original Prusa printer over PrusaLink: printer state, job progress with time left and finish time, nozzle and bed temperatures, and the slicer's preview of the model. Talks to the printer on your own network; no Prusa account needed.",
